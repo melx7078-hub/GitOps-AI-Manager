@@ -8,6 +8,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useSettingsStore } from './store/settings';
 import { Toaster } from '@/components/ui/sonner';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 import Onboarding from './pages/Onboarding';
 import Dashboard from './pages/Dashboard';
@@ -43,17 +44,19 @@ export default function App() {
   const isOnboarded = useSettingsStore(state => state.isOnboarded());
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Navigate to={isOnboarded ? "/dashboard" : "/onboarding"} replace />} />
-          <Route path="/onboarding" element={<Onboarding />} />
-          <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-          <Route path="/repo/:owner/:repo" element={<ProtectedRoute><RepoDetails /></ProtectedRoute>} />
-          <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
-        </Routes>
-        <Toaster />
-      </BrowserRouter>
-    </QueryClientProvider>
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/" element={<Navigate to={isOnboarded ? "/dashboard" : "/onboarding"} replace />} />
+            <Route path="/onboarding" element={<Onboarding />} />
+            <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+            <Route path="/repo/:owner/:repo" element={<ProtectedRoute><RepoDetails /></ProtectedRoute>} />
+            <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+          </Routes>
+          <Toaster />
+        </BrowserRouter>
+      </QueryClientProvider>
+    </ErrorBoundary>
   );
 }

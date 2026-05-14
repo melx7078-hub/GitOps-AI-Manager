@@ -41,6 +41,14 @@ export default function RepoDetails() {
   // Artifacts
   const [artifacts, setArtifacts] = useState<any[]>([]);
 
+  // Files state
+  const [tree, setTree] = useState<any[]>([]);
+  const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
+  const [fileContent, setFileContent] = useState('');
+  const [fileSha, setFileSha] = useState('');
+  const [isSavingFile, setIsSavingFile] = useState(false);
+  const [fileSearch, setFileSearch] = useState('');
+
   const logsEndRef = useRef<HTMLDivElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -118,7 +126,24 @@ export default function RepoDetails() {
               if (data.artifacts) setArtifacts(data.artifacts);
           })
       }
-  }, [activeTab]);
+      
+      if (activeTab === 'files' && tree.length === 0) {
+        githubApi.getBranch(owner!, repo!, 'main').then(data => {
+          githubApi.getTree(owner!, repo!, data.commit.sha).then(treeData => {
+             setTree(treeData.tree.filter((t: any) => t.type === 'blob'));
+          });
+        }).catch(() => toast.error('Failed to load file tree. Branch might not be main.'));
+      }
+  }, [activeTab, owner, repo, tree.length]);
+
+  useEffect(() => {
+    if (selectedFilePath && activeTab === 'files') {
+      githubApi.getFile(owner!, repo!, selectedFilePath).then(res => {
+         setFileSha(res.sha);
+         setFileContent(decodeURIComponent(escape(atob(res.content))));
+      }).catch(() => toast.error('Failed to load file'));
+    }
+  }, [selectedFilePath, activeTab, owner, repo]);
 
   const handleAnalyzeError = async (logData = logs) => {
     if (!logData) return toast.info("No logs available to analyze.");
@@ -172,6 +197,21 @@ export default function RepoDetails() {
        // Let's prompt for branch branch temporarily or just 'main'
        toast.error("Manual trigger UI not fully implemented, requires workflow ID.");
     } catch(e) {}
+  };
+
+  const saveFile = async () => {
+     if (!selectedFilePath || !fileSha) return;
+     setIsSavingFile(true);
+     try {
+       const encodedContent = btoa(unescape(encodeURIComponent(fileContent)));
+       const res = await githubApi.updateFile(owner!, repo!, selectedFilePath, `Direct update from GitOps: ${selectedFilePath}`, encodedContent, fileSha, 'main');
+       if (res.content?.sha) setFileSha(res.content.sha);
+       toast.success("Successfully committed and pushed to main!");
+     } catch (e: any) {
+       toast.error(e.message || "Failed to save file.");
+     } finally {
+       setIsSavingFile(false);
+     }
   };
   
   const applyCodeFix = async (jsonStr: string) => {
@@ -246,9 +286,10 @@ export default function RepoDetails() {
         <div className="flex-1">
           <h1 className="font-semibold text-lg">{owner}/{repo}</h1>
         </div>
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-[300px]">
-          <TabsList className="grid w-full grid-cols-2">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-[400px]">
+          <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="workflows">Workflows</TabsTrigger>
+            <TabsTrigger value="files">Files</TabsTrigger>
             <TabsTrigger value="artifacts">Artifacts</TabsTrigger>
           </TabsList>
         </Tabs>
@@ -322,10 +363,18 @@ export default function RepoDetails() {
                        <pre className="p-4 text-xs font-mono text-zinc-300 whitespace-pre-wrap break-all">
                           {!logs ? "Waiting for logs..." : (
                              logs.split('\n').slice(-2000).map((line, idx) => {
-                               const isError = line.toLowerCase().includes('error') || line.toLowerCase().includes('failed') || line.toLowerCase().includes('exception');
+                               // Extract timestamps and ignore raw GH action steps if desired
+                               const cleanedLine = line.replace(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z /, '');
+                               const lowerLine = cleanedLine.toLowerCase();
+                               const isError = lowerLine.includes('error') || lowerLine.includes('failed') || lowerLine.includes('exception');
+                               const isGroup = cleanedLine.startsWith('##[group]');
+                               const isEndGroup = cleanedLine.startsWith('##[endgroup]');
+                               
+                               if (isGroup || isEndGroup) return null; // hide raw github action groups
+
                                return (
                                   <div key={idx} className={`px-1 rounded mb-[1px] ${isError ? 'text-red-400 bg-red-950/30 font-semibold border-l-2 border-red-500' : 'hover:bg-zinc-800/50'}`}>
-                                     <Ansi>{line}</Ansi>
+                                     <Ansi>{cleanedLine}</Ansi>
                                   </div>
                                );
                              })
@@ -400,6 +449,52 @@ export default function RepoDetails() {
           </div>
         )}
         
+        {activeTab === 'files' && (
+           <div className="flex flex-1 overflow-hidden h-full">
+              <div className="w-1/3 border-r dark:border-zinc-800 flex flex-col bg-zinc-50 dark:bg-zinc-900">
+                 <div className="p-2 border-b dark:border-zinc-800">
+                    <Input placeholder="Search files..." value={fileSearch} onChange={e => setFileSearch(e.target.value)} className="h-8 bg-white dark:bg-zinc-950" />
+                 </div>
+                 <ScrollArea className="flex-1">
+                    <div className="p-2 space-y-1">
+                       {tree.filter(t => t.path.toLowerCase().includes(fileSearch.toLowerCase())).slice(0, 200).map(t => (
+                          <div 
+                             key={t.path} 
+                             onClick={() => setSelectedFilePath(t.path)}
+                             className={`cursor-pointer text-sm p-1.5 px-2 rounded truncate ${selectedFilePath === t.path ? 'bg-zinc-200 dark:bg-zinc-800 font-medium' : 'hover:bg-zinc-200/50 dark:hover:bg-zinc-800/50'}`}
+                             title={t.path}
+                           >
+                             {t.path}
+                          </div>
+                       ))}
+                    </div>
+                 </ScrollArea>
+              </div>
+              <div className="w-2/3 flex flex-col bg-white dark:bg-zinc-950">
+                 {selectedFilePath ? (
+                    <>
+                       <div className="flex items-center justify-between p-2 border-b dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900">
+                          <div className="font-medium text-sm truncate px-2 text-zinc-700 dark:text-zinc-300">{selectedFilePath}</div>
+                          <Button size="sm" onClick={saveFile} disabled={isSavingFile}>
+                             {isSavingFile ? 'Saving...' : 'Commit & Push'}
+                          </Button>
+                       </div>
+                       <Textarea 
+                          className="flex-1 rounded-none border-0 font-mono text-sm p-4 focus-visible:ring-0 resize-none h-full bg-transparent"
+                          value={fileContent}
+                          onChange={e => setFileContent(e.target.value)}
+                          spellCheck={false}
+                       />
+                    </>
+                 ) : (
+                    <div className="flex-1 flex items-center justify-center text-zinc-500 text-sm">
+                       Select a file to view and edit
+                    </div>
+                 )}
+              </div>
+           </div>
+        )}
+
         {activeTab === 'artifacts' && (
           <div className="p-6 max-w-5xl mx-auto w-full">
             <Card className="mb-6">

@@ -81,6 +81,12 @@ export const githubApi = {
       body: JSON.stringify({ ref }),
     }),
 
+  // Branches & Trees
+  getBranch: async (owner: string, repo: string, branch: string) => 
+    fetchGitHub(`/repos/${owner}/${repo}/branches/${branch}`),
+  getTree: async (owner: string, repo: string, treeSha: string, recursive: boolean = true) => 
+    fetchGitHub(`/repos/${owner}/${repo}/git/trees/${treeSha}${recursive ? '?recursive=1' : ''}`),
+
   // Files
   getFile: async (owner: string, repo: string, path: string, ref?: string) => {
     const query = ref ? `?ref=${ref}` : '';
